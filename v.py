@@ -19,14 +19,47 @@ torch.backends.cudnn.deterministic = True
 # Device configuration
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
+class LocalContrastNorm(nn.Module):
+    """Local contrast normalization as described in ZF2013 Section 2"""
+    def __init__(self, num_features, k=2, n=5, alpha=1e-4, beta=0.75):
+        super().__init__()
+        self.n = n  # Size of local region
+        self.alpha = alpha  # Scale parameter
+        self.beta = beta  # Exponent
+        
+        # Create gaussian kernel for local averaging
+        kernel = torch.ones(num_features, 1, n, n) / (n * n)
+        self.register_buffer('kernel', kernel)
+    
+    def forward(self, x):
+        # All kernels are already on the correct device thanks to register_buffer
+        # Calculate local average using convolution
+        local_mean = F.conv2d(x, self.kernel, padding='same', groups=x.size(1))
+        
+        # Subtract mean and normalize
+        centered = x - local_mean
+        
+        # Calculate local standard deviation
+        local_var = F.conv2d(centered.pow(2), self.kernel, padding='same', groups=x.size(1))
+        local_std = (local_var + self.alpha).pow(self.beta)
+        
+        # Normalize by local standard deviation
+        normalized = centered / local_std
+        
+        return normalized
+
 class SimpleCNN(nn.Module):
     def __init__(self, config):
         super().__init__()
         # Encoder (CNN) layers
         self.conv1 = nn.Conv2d(1, config.conv1_channels, kernel_size=config.kernel_size, stride=1, padding=1)
+        self.norm1 = LocalContrastNorm(config.conv1_channels)
         self.pool1 = nn.MaxPool2d(kernel_size=config.pool_size, stride=2, return_indices=True)
+        
         self.conv2 = nn.Conv2d(config.conv1_channels, config.conv2_channels, kernel_size=config.kernel_size, stride=1, padding=1)
+        self.norm2 = LocalContrastNorm(config.conv2_channels)
         self.pool2 = nn.MaxPool2d(kernel_size=config.pool_size, stride=2, return_indices=True)
+        
         self.fc = nn.Linear(config.conv2_channels * 7 * 7, config.fc_units)
         
         # Decoder (Deconv) layers for visualization
@@ -34,6 +67,33 @@ class SimpleCNN(nn.Module):
         self.deconv1 = nn.ConvTranspose2d(config.conv2_channels, config.conv1_channels, kernel_size=config.kernel_size, stride=1, padding=1)
         self.unpool2 = nn.MaxUnpool2d(kernel_size=config.pool_size, stride=2)
         self.deconv2 = nn.ConvTranspose2d(config.conv1_channels, 1, kernel_size=config.kernel_size, stride=1, padding=1)
+        
+        # Store conv layers for normalization
+        self.conv_layers = [self.conv1, self.conv2]
+        self.filter_radius = 1e-1  # As per ZF2013
+        self.steps_since_norm = 0
+        self.norm_frequency = 50  # Normalize every 50 steps
+
+    def normalize_filters(self):
+        """Normalize filters whose RMS exceeds a fixed radius to that fixed radius (ZF2013 Sec 3)"""
+        self.steps_since_norm += 1
+        if self.steps_since_norm >= self.norm_frequency:
+            with torch.no_grad():
+                for conv in self.conv_layers:
+                    # Calculate RMS for each filter
+                    weight = conv.weight.data
+                    rms = torch.sqrt(torch.mean(weight.pow(2), dim=(1,2,3)))
+                    
+                    # Find filters exceeding the radius
+                    exceeded = rms > self.filter_radius
+                    
+                    # Only normalize if any filters exceed the radius
+                    if exceeded.any():
+                        scale = torch.ones_like(rms)
+                        scale[exceeded] = self.filter_radius / rms[exceeded]
+                        conv.weight.data *= scale.view(-1, 1, 1, 1)
+            
+            self.steps_since_norm = 0
 
     def forward(self, x, store_switches=False):
         # Forward pass through encoder
@@ -41,6 +101,7 @@ class SimpleCNN(nn.Module):
         
         # Layer 1
         x = F.relu(self.conv1(x))
+        x = self.norm1(x)  # Apply contrast normalization
         if store_switches:
             switches['pre_pool1'] = x
         x, switch1 = self.pool1(x)
@@ -49,6 +110,7 @@ class SimpleCNN(nn.Module):
             
         # Layer 2
         x = F.relu(self.conv2(x))
+        x = self.norm2(x)  # Apply contrast normalization
         if store_switches:
             switches['pre_pool2'] = x
         x, switch2 = self.pool2(x)
@@ -62,16 +124,37 @@ class SimpleCNN(nn.Module):
         return (x, switches) if store_switches else x
 
     def deconv_visualization(self, feature_maps, switches, layer):
-        """Project feature maps back to input space"""
+        """Project feature maps back to input space using deconvnet approach (ZF2013 Sec 2.1)
+        Steps for each layer:
+        1. Unpool - Use stored switch locations
+        2. Rectify - Apply ReLU
+        3. Filter - Use transposed convolution filters
+        """
+        x = feature_maps
+        
         if layer == 2:
-            x = feature_maps
+            # Unpool layer 2
             x = self.unpool1(x, switches['pool2'])
-            x = F.relu(self.deconv1(x))
+            # Rectify
+            x = F.relu(x)
+            # Filter with transposed weights
+            x = self.deconv1(x)
+            
+            # Unpool layer 1
             x = self.unpool2(x, switches['pool1'])
-        else:
-            x = feature_maps
-            x = F.interpolate(x, size=(28, 28), mode='nearest')
-        return self.deconv2(x)
+            # Rectify
+            x = F.relu(x)
+            # Filter with transposed weights
+            x = self.deconv2(x)
+        else:  # layer 1
+            # Unpool layer 1
+            x = self.unpool2(x, switches['pool1'])
+            # Rectify
+            x = F.relu(x)
+            # Filter with transposed weights
+            x = self.deconv2(x)
+            
+        return x
 
 def get_data(config):
     """Load MNIST dataset"""
@@ -92,13 +175,17 @@ def train(model, train_loader, config):
     """Train the model"""
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=config.learning_rate)
-    wandb.watch(model, criterion, log="all", log_freq=100)
+    wandb.watch(model, criterion, log="all", log_freq=50)
+    
+    # Move model to device once
+    model = model.to(device)
     
     for epoch in tqdm(range(config.epochs)):
         model.train()
         epoch_loss = epoch_accuracy = num_batches = 0
         
         for images, labels in train_loader:
+            # Move batch to device
             images, labels = images.to(device), labels.to(device)
             
             # Forward pass and loss
@@ -110,12 +197,16 @@ def train(model, train_loader, config):
             loss.backward()
             optimizer.step()
             
+            # Periodic filter normalization
+            model.normalize_filters()
+            
             # Track metrics
-            _, predicted = torch.max(outputs.data, 1)
-            accuracy = (predicted == labels).sum().item() / labels.size(0)
-            epoch_loss += loss.item()
-            epoch_accuracy += accuracy
-            num_batches += 1
+            with torch.no_grad():  # Don't track metrics computation
+                _, predicted = torch.max(outputs.data, 1)
+                accuracy = (predicted == labels).sum().item() / labels.size(0)
+                epoch_loss += loss.item()
+                epoch_accuracy += accuracy
+                num_batches += 1
             
             # Log batch metrics
             wandb.log({
@@ -169,7 +260,7 @@ def find_strongest_activations(model, data_loader, num_samples=1000):
     return strongest
 
 def visualize_features(model, strongest_activations, layer):
-    """Visualize patterns that cause strongest activations"""
+    """Visualize patterns that cause strongest activations using deconvnet approach (ZF2013)"""
     model.eval()
     with torch.no_grad():
         # Setup visualization
@@ -179,17 +270,25 @@ def visualize_features(model, strongest_activations, layer):
         # Process each feature
         num_features = strongest_activations[layer]['activations'].size(0)
         for idx in range(min(32, num_features)):
-            # Get original image and its feature maps
+            # Get original image that caused strongest activation
             image = strongest_activations[layer]['images'][idx:idx+1]
             _, switches = model(image.to(device), store_switches=True)
             
-            # Get and zero out feature maps except the target one
-            maps = switches['features'] if layer == 2 else switches['pre_pool1']
-            zeroed = torch.zeros_like(maps)
-            zeroed[0, idx] = maps[0, idx]
+            # Get the feature maps for this layer
+            feature_maps = switches['features'] if layer == 2 else switches['pre_pool1']
             
-            # Get reconstruction
-            reconstruction = model.deconv_visualization(zeroed, switches, layer)
+            # Create a copy with all activations set to zero except the target feature
+            zeroed_maps = torch.zeros_like(feature_maps)
+            
+            # For the target feature map, keep only its strongest activation
+            target_map = feature_maps[0, idx].clone()
+            max_val, max_idx = target_map.view(-1).max(0)
+            target_map_zeroed = torch.zeros_like(target_map)
+            target_map_zeroed.view(-1)[max_idx] = max_val
+            zeroed_maps[0, idx] = target_map_zeroed
+            
+            # Get reconstruction through deconvnet
+            reconstruction = model.deconv_visualization(zeroed_maps, switches, layer)
             
             # Plot
             ax = axes[idx // 8, idx % 8]
@@ -212,7 +311,7 @@ if __name__ == "__main__":
     config = {
         "architecture": "SimpleCNN",
         "dataset": "MNIST",
-        "epochs": 5,
+        "epochs": 2,
         "batch_size": 64,
         "learning_rate": 0.001,
         "conv1_channels": 32,
