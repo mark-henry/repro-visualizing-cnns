@@ -112,29 +112,59 @@ class SimpleCNN(nn.Module):
         
         # Filter normalization parameters
         self.filter_radius = 1e-1  # As per ZF2013
-        self.steps_since_norm = 0
-        self.norm_frequency = 50  # Normalize every 50 steps
+        self.steps_until_next_norm = self.norm_frequency = 50  # Normalize every 50 steps
 
-    def normalize_filters(self):
-        """Normalize filters whose RMS exceeds a fixed radius to that fixed radius (ZF2013 Sec 3)"""
-        self.steps_since_norm += 1
-        if self.steps_since_norm >= self.norm_frequency:
-            with torch.no_grad():
-                for layer in self.conv_layers:
-                    # Calculate RMS for each filter
-                    weight = layer.conv.weight.data
-                    rms = torch.sqrt(torch.mean(weight.pow(2), dim=(1,2,3)))
-                    
-                    # Find filters exceeding the radius
-                    exceeded = rms > self.filter_radius
-                    
-                    # Only normalize if any filters exceed the radius
-                    if exceeded.any():
-                        scale = torch.ones_like(rms)
-                        scale[exceeded] = self.filter_radius / rms[exceeded]
-                        layer.conv.weight.data *= scale.view(-1, 1, 1, 1)
+    def tick_filter_norm_clock(self):
+        """Advance the filter normalization clock and return whether it's time to normalize.
+        
+        Returns:
+            bool: True if it's time to normalize filters (clock has reached frequency)
+        """
+        self.steps_until_next_norm -= 1
+        if self.steps_until_next_norm <= 0:
+            self.steps_until_next_norm = self.norm_frequency
+            return True
+        return False
+    
+    def is_filter_norm_due(self):
+        """Check if it's time to normalize filters based on the clock without advancing it"""
+        return self.steps_until_next_norm <= 0
+    
+    def normalize_filters(self, force=False):
+        """Normalize filters whose RMS exceeds a fixed radius to that fixed radius (ZF2013 Sec 3)
+        
+        Args:
+            force: If True, normalize regardless of clock. Useful for testing.
             
-            self.steps_since_norm = 0
+        Returns:
+            dict: Information about normalization for each layer:
+                {layer_idx: {'exceeded': tensor of which filters exceeded,
+                           'scale': tensor of scaling factors applied}}
+        """
+        if not (force or self.tick_filter_norm_clock()):
+            return {}
+            
+        normalization_info = {}
+        with torch.no_grad():
+            for i, layer in enumerate(self.conv_layers):
+                # Calculate RMS for each filter
+                weight = layer.conv.weight.data
+                rms = torch.sqrt(torch.mean(weight.pow(2), dim=(1,2,3)))
+                
+                # Find filters exceeding the radius
+                exceeded = rms > self.filter_radius
+                
+                # Only normalize if any filters exceed the radius
+                if exceeded.any():
+                    scale = torch.ones_like(rms)
+                    scale[exceeded] = self.filter_radius / rms[exceeded]
+                    layer.conv.weight.data *= scale.view(-1, 1, 1, 1)
+                    normalization_info[i] = {
+                        'exceeded': exceeded,
+                        'scale': scale
+                    }
+        
+        return normalization_info
 
     def forward(self, x, store_indices=False):
         pool_indices = {}
