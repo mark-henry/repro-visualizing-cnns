@@ -9,16 +9,27 @@ def test_deconv_visualization(normal_config):
     batch_size = 1
     
     # Create mock layer states
+    # After first conv (stride 2): 14x14
+    # After first pool: 7x7
+    # After second conv (stride 1): 7x7
+    # After second pool: 3x3
+
+    # Layer 1: 7x7 -> 14x14 (unpool) -> 28x28 (deconv)
+    # For 7x7 input and 14x14 output with 2x2 pooling:
+    # Each index should be within range [0, 14*14 - 1]
     layer1_state = LayerState(
-        output=torch.randn(batch_size, 32, 14, 14),
-        pre_pool=torch.randn(batch_size, 32, 28, 28),
-        pool_indices=torch.randint(0, 196, (batch_size, 32, 14, 14))
+        output=torch.randn(batch_size, 32, 7, 7),  # After pool
+        pre_pool=torch.randn(batch_size, 32, 14, 14),  # After conv
+        pool_indices=torch.randint(0, 14*14, (batch_size, 32, 7, 7))
     )
     
+    # Layer 2: 3x3 -> 7x7 (unpool) -> 14x14 (deconv)
+    # For 3x3 input and 7x7 output with 2x2 pooling:
+    # Each index should be within range [0, 7*7 - 1]
     layer2_state = LayerState(
-        output=torch.randn(batch_size, 64, 7, 7),
-        pre_pool=torch.randn(batch_size, 64, 14, 14),
-        pool_indices=torch.randint(0, 49, (batch_size, 64, 7, 7))
+        output=torch.randn(batch_size, 64, 3, 3),  # After pool
+        pre_pool=torch.randn(batch_size, 64, 7, 7),  # After conv
+        pool_indices=torch.randint(0, 7*7, (batch_size, 64, 3, 3))
     )
     
     # Create mock model state
@@ -29,13 +40,13 @@ def test_deconv_visualization(normal_config):
     )
     
     # Test Layer 1
-    feature_maps_1 = torch.randn(batch_size, 32, 14, 14)  # Small feature map
+    feature_maps_1 = torch.randn(batch_size, 32, 7, 7)  # Small feature map
     output_1 = model.deconv_visualization(feature_maps_1, model_state, layer=1)
     assert output_1.shape == (batch_size, 1, 28, 28), \
         "Layer 1 visualization should output original image size"
     
     # Test Layer 2
-    feature_maps_2 = torch.randn(batch_size, 64, 7, 7)  # Smaller feature map
+    feature_maps_2 = torch.randn(batch_size, 64, 3, 3)  # Smaller feature map
     output_2 = model.deconv_visualization(feature_maps_2, model_state, layer=2)
     assert output_2.shape == (batch_size, 1, 28, 28), \
         "Layer 2 visualization should output original image size"

@@ -19,10 +19,11 @@ class ModelState:
 class SimpleCNN(nn.Module):
     def __init__(self, config):
         super().__init__()
-        # Create convolutional layers
+        # Create convolutional layers with appropriate strides
+        # First layer uses stride 2 as per ZF2013 Fig 3
         self.conv_layers = nn.ModuleList([
-            ConvLayer(1, config.conv1_channels, config.kernel_size),
-            ConvLayer(config.conv1_channels, config.conv2_channels, config.kernel_size)
+            ConvLayer(1, config.conv1_channels, config.kernel_size, stride=2),
+            ConvLayer(config.conv1_channels, config.conv2_channels, config.kernel_size, stride=1)
         ])
         
         # Create corresponding deconvolutional layers with references to conv layers
@@ -31,8 +32,13 @@ class SimpleCNN(nn.Module):
             DeconvLayer(self.conv_layers[0])   # First conv layer
         ])
         
-        # Final classification layer
-        self.fc = nn.Linear(config.conv2_channels * 7 * 7, config.fc_units)
+        # Calculate final feature map size
+        # Input is 28x28
+        # After first conv with stride 2: 14x14
+        # After first pool: 7x7
+        # After second conv with stride 1: 7x7
+        # After second pool: 3x3
+        self.fc = nn.Linear(config.conv2_channels * 3 * 3, config.fc_units)
         
         # Filter normalization parameters
         self.filter_radius = 1e-1  # As per ZF2013
