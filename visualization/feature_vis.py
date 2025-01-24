@@ -23,7 +23,7 @@ def find_strongest_activations(model, data_loader, num_samples=1000, top_k=9):
             for layer in [1, 2]:
                 # Get feature maps for this layer
                 acts = (model_state.final_features if layer == len(model.conv_layers)
-                       else model_state.layer_states[layer-1].pre_pool)
+                       else model_state.layer_states[layer-1].output)
                 
                 # Initialize storage if needed
                 if strongest[layer]['activations'] is None:
@@ -111,7 +111,7 @@ def visualize_features(model, strongest_activations, layer):
                 
                 # Get the feature maps for this layer
                 feature_maps = (model_state.final_features if layer == len(model.conv_layers) 
-                              else model_state.layer_states[layer-1].pre_pool)
+                              else model_state.layer_states[layer-1].output)
                 
                 # Create a copy with all feature maps zeroed except the target one
                 zeroed_maps = torch.zeros_like(feature_maps)
