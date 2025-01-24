@@ -43,11 +43,10 @@ class ConvLayer(nn.Module):
 
 class DeconvLayer(nn.Module):
     """A single deconvolutional layer with unpooling"""
-    def __init__(self, in_channels, out_channels, kernel_size, pool_size=2):
+    def __init__(self, conv_layer: ConvLayer, pool_size=2):
         super().__init__()
         self.unpool = nn.MaxUnpool2d(kernel_size=pool_size, stride=2)
-        self.deconv = nn.ConvTranspose2d(in_channels, out_channels, 
-                                       kernel_size=kernel_size, stride=1, padding=1)
+        self.conv_layer = conv_layer
         
     def forward(self, x, max_indices, pre_pool_size):
         # Ensure feature map dimensions match pooling indices
@@ -56,5 +55,10 @@ class DeconvLayer(nn.Module):
             
         x = self.unpool(x, max_indices, output_size=pre_pool_size)
         x = F.relu(x)
-        x = self.deconv(x)
+        
+        # Use transposed (flipped) filters from conv layer
+        weight = self.conv_layer.conv.weight.flip([2, 3])  # Flip height and width
+        x = F.conv_transpose2d(x, weight, 
+                             stride=1, 
+                             padding=self.conv_layer.conv.padding[0])
         return x 

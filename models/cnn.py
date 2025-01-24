@@ -25,10 +25,10 @@ class SimpleCNN(nn.Module):
             ConvLayer(config.conv1_channels, config.conv2_channels, config.kernel_size)
         ])
         
-        # Create corresponding deconvolutional layers
+        # Create corresponding deconvolutional layers with references to conv layers
         self.deconv_layers = nn.ModuleList([
-            DeconvLayer(config.conv2_channels, config.conv1_channels, config.kernel_size),
-            DeconvLayer(config.conv1_channels, 1, config.kernel_size)
+            DeconvLayer(self.conv_layers[1]),  # Second conv layer
+            DeconvLayer(self.conv_layers[0])   # First conv layer
         ])
         
         # Final classification layer
@@ -37,6 +37,10 @@ class SimpleCNN(nn.Module):
         # Filter normalization parameters
         self.filter_radius = 1e-1  # As per ZF2013
         self.steps_until_next_norm = self.norm_frequency = 50  # Normalize every 50 steps
+        
+        # Device handling
+        self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        self.to(self.device)
         
     def tick_filter_norm_clock(self):
         """Advance the filter normalization clock and return whether it's time to normalize.
@@ -144,3 +148,16 @@ class SimpleCNN(nn.Module):
             x = deconv_layer(x, layer_state.pool_indices, layer_state.pre_pool.size())
         
         return x 
+
+    def load_state_dict(self, state_dict):
+        """Custom state dict loading to handle architectural changes"""
+        # Create new state dict with remapped keys
+        new_state_dict = {}
+        
+        # Copy over conv layer and fc weights directly
+        for key in state_dict:
+            if key.startswith('conv_layers') or key.startswith('fc'):
+                new_state_dict[key] = state_dict[key]
+        
+        # Load the state dict with strict=False to ignore missing deconv keys
+        super().load_state_dict(new_state_dict, strict=False) 

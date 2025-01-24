@@ -13,12 +13,12 @@ if __name__ == "__main__":
     config = {
         "architecture": "SimpleCNN",
         "dataset": "MNIST",
-        "epochs": 2,
+        "epochs": 1,
         "batch_size": 64,
         "learning_rate": 0.001,
-        "conv1_channels": 32,
-        "conv2_channels": 64,
-        "kernel_size": 3,
+        "conv1_channels": 8,
+        "conv2_channels": 16,
+        "kernel_size": 5,
         "pool_size": 2,
         "fc_units": 10,
     }
@@ -29,8 +29,8 @@ if __name__ == "__main__":
                       help='Whether to train a new model or visualize an existing one')
     parser.add_argument('--model_path', type=str, default='model.pth',
                       help='Path to save/load the model (default: model.pth)')
-    parser.add_argument('--num_images', type=int, default=1000,
-                      help='Number of images to search for strongest activations (default: 1000)')
+    parser.add_argument('--num_images', type=int, default=10000,
+                      help='Number of images to search for strongest activations (default: 10000)')
     parser.add_argument('--layers', type=str, default='1,2',
                       help='Comma-separated list of layers to visualize (default: 1,2)')
     args = parser.parse_args()

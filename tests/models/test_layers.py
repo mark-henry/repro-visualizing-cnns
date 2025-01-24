@@ -40,7 +40,10 @@ def test_deconv_layer():
     """Test a single deconvolutional layer"""
     batch_size, in_channels, out_channels = 1, 64, 32
     small_size = 7
-    layer = DeconvLayer(in_channels, out_channels, kernel_size=3)
+    
+    # Create conv layer first
+    conv = ConvLayer(in_channels, out_channels, kernel_size=3)
+    layer = DeconvLayer(conv)
     
     # Create inputs
     x = torch.randn(batch_size, in_channels, small_size, small_size)
@@ -61,7 +64,7 @@ def test_end_to_end_conv_deconv():
     input_size = 28
     
     conv = ConvLayer(1, channels, kernel_size=3)
-    deconv = DeconvLayer(channels, 1, kernel_size=3)
+    deconv = DeconvLayer(conv)
     
     # Create input with known pattern - make it more pronounced
     x = torch.zeros(batch_size, 1, input_size, input_size)
