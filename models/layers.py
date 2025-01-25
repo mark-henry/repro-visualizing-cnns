@@ -12,14 +12,46 @@ class LayerState:
     pool_indices: Optional[torch.Tensor] = None
 
 class ConvLayer(nn.Module):
-    """A single convolutional layer with pooling and normalization"""
+    """A single convolutional layer with pooling and contrast normalization"""
     def __init__(self, in_channels, out_channels, kernel_size, stride=1):
         super().__init__()
         # Calculate padding to maintain spatial dimensions
         padding = ((stride - 1) + kernel_size - 1) // 2
         self.conv = nn.Conv2d(in_channels, out_channels, kernel_size, stride=stride, padding=padding)
-        self.bn = nn.BatchNorm2d(out_channels)
         self.pool = nn.MaxPool2d(2, return_indices=True)
+        
+    def contrast_normalize(self, x, size=5, k=2):
+        """Local contrast normalization as per ZF2013
+        Args:
+            x: Input tensor [batch, channels, height, width]
+            size: Size of local region for normalization (paper uses 5x5)
+            k: Constant added to denominator for numerical stability
+        """
+        # Calculate local mean
+        kernel = torch.ones(1, 1, size, size, device=x.device) / (size * size)
+        padding = size // 2
+        
+        # For each channel separately
+        normalized = []
+        for c in range(x.shape[1]):
+            # Get this channel
+            xc = x[:, c:c+1]  # Keep dim
+            
+            # Calculate mean using average pooling
+            mean = F.conv2d(xc, kernel, padding=padding)
+            
+            # Subtract mean (local mean subtraction)
+            centered = xc - mean
+            
+            # Calculate local standard deviation
+            var = F.conv2d(centered ** 2, kernel, padding=padding)
+            std = torch.sqrt(var + k)
+            
+            # Divide by standard deviation
+            normalized.append(centered / std)
+        
+        # Stack channels back together
+        return torch.cat(normalized, dim=1)
         
     def forward(self, x):
         """Forward pass through the layer
@@ -30,9 +62,13 @@ class ConvLayer(nn.Module):
         Returns:
             LayerState containing output and intermediate states
         """
-        # Convolution and activation
+        # Convolution
         x = self.conv(x)
-        x = self.bn(x)
+        
+        # Contrast normalization
+        x = self.contrast_normalize(x)
+        
+        # ReLU
         x = F.relu(x)
         
         # Store pre-pool features
@@ -59,6 +95,9 @@ class DeconvLayer(nn.Module):
         """
         # Unpool to match the exact size from forward pass
         x = self.unpool(x, max_indices, output_size=pre_pool_size)
+        
+        # Apply ReLU after unpooling as per ZF2013
+        x = F.relu(x)
         
         # Flip kernel dimensions for transposed convolution
         weight = self.conv_layer.conv.weight.flip([2, 3])

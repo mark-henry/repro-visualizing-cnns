@@ -150,4 +150,57 @@ def test_conv_deconv_reconstruction():
     # This indicates the edge has been detected and reconstructed, though shifted by 1 pixel
     left_cols = output[0,0,:,2:4].mean()  # Should be negative
     right_cols = output[0,0,:,4:6].mean()  # Should be positive
-    assert right_cols - left_cols > 2.0, "Reconstructed edge should show strong contrast" 
+    assert right_cols - left_cols > 2.0, "Reconstructed edge should show strong contrast"
+
+def test_conv_deconv_stride():
+    """Test that deconvolution correctly handles different stride values"""
+    batch_size, channels = 1, 1
+    
+    # Test with stride=2
+    conv_stride2 = ConvLayer(channels, channels, kernel_size=3, stride=2)
+    deconv_stride2 = DeconvLayer(conv_stride2)
+    
+    # Create a simple 8x8 input
+    x = torch.zeros(batch_size, channels, 8, 8)
+    x[0, 0, 3:5, 3:5] = 1.0  # 2x2 square in the middle
+    
+    print("\nStride 2 Test:")
+    print("Input:")
+    print(x[0, 0])
+    
+    # Forward through conv (8x8 -> 4x4 -> 2x2)
+    state = conv_stride2(x)
+    print("\nAfter stride-2 conv (pre-pool):")
+    print(state.pre_pool[0, 0])
+    print("\nAfter pooling:")
+    print(state.output[0, 0])
+    
+    # Forward through deconv
+    output = deconv_stride2(state.output, state.pool_indices, state.pre_pool.shape)
+    print("\nAfter deconv:")
+    print(output[0, 0])
+    
+    # The output should be same size as input
+    assert output.shape == x.shape, \
+        f"Expected shape {x.shape}, got {output.shape}"
+    
+    # Test with stride=1
+    conv_stride1 = ConvLayer(channels, channels, kernel_size=3, stride=1)
+    deconv_stride1 = DeconvLayer(conv_stride1)
+    
+    print("\nStride 1 Test:")
+    # Forward through conv (8x8 -> 8x8 -> 4x4)
+    state = conv_stride1(x)
+    print("\nAfter stride-1 conv (pre-pool):")
+    print(state.pre_pool[0, 0])
+    print("\nAfter pooling:")
+    print(state.output[0, 0])
+    
+    # Forward through deconv
+    output = deconv_stride1(state.output, state.pool_indices, state.pre_pool.shape)
+    print("\nAfter deconv:")
+    print(output[0, 0])
+    
+    # The output should be same size as input
+    assert output.shape == x.shape, \
+        f"Expected shape {x.shape}, got {output.shape}" 
