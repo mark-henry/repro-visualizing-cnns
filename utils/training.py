@@ -3,19 +3,23 @@ import torch.nn as nn
 from torchvision import datasets, transforms
 import wandb
 from tqdm.auto import tqdm
+from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts
 
 def get_data(config):
-    """Load MNIST dataset"""
+    """Load CIFAR-100 dataset"""
     transform = transforms.Compose([
-        transforms.ToTensor(), 
+        transforms.Resize(224),  # Resize to match ImageNet dimensions
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.5071, 0.4867, 0.4408],  # CIFAR-100 mean
+                           std=[0.2675, 0.2565, 0.2761])     # CIFAR-100 std
     ])
     
-    train_dataset = datasets.MNIST('./data', train=True, download=True, transform=transform)
-    test_dataset = datasets.MNIST('./data', train=False, transform=transform)
+    train_dataset = datasets.CIFAR100('./data', train=True, download=True, transform=transform)
+    test_dataset = datasets.CIFAR100('./data', train=False, transform=transform)
     
     return (
-        torch.utils.data.DataLoader(train_dataset, batch_size=config.batch_size, shuffle=True),
-        torch.utils.data.DataLoader(test_dataset, batch_size=config.batch_size)
+        torch.utils.data.DataLoader(train_dataset, batch_size=config.batch_size, shuffle=True, num_workers=4),
+        torch.utils.data.DataLoader(test_dataset, batch_size=config.batch_size, num_workers=4)
     )
 
 def evaluate(model, test_loader):
@@ -50,6 +54,19 @@ def train(model, train_loader, test_loader, config):
     """Train the model"""
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=config.learning_rate)
+    
+    # Cosine annealing scheduler with warm restarts
+    # T_0: number of iterations for the first restart
+    # T_mult: factor to increase T_i after a restart
+    # We'll do 2 restarts per epoch, and double the cycle length after each restart
+    steps_per_epoch = len(train_loader)
+    scheduler = CosineAnnealingWarmRestarts(
+        optimizer,
+        T_0=steps_per_epoch // 2,  # First restart after half epoch
+        T_mult=2,  # Double the period after each restart
+        eta_min=config.learning_rate * 0.01  # Min learning rate is 1% of initial
+    )
+    
     wandb.watch(model, criterion, log="all", log_freq=50)
     
     # Move model to device once
@@ -78,6 +95,10 @@ def train(model, train_loader, test_loader, config):
             loss.backward()
             optimizer.step()
             
+            # Update learning rate
+            scheduler.step()
+            current_lr = scheduler.get_last_lr()[0]
+            
             # Periodic filter normalization
             if global_step % norm_frequency == 0:
                 normalization_info = model.normalize_filters()
@@ -100,6 +121,7 @@ def train(model, train_loader, test_loader, config):
                 "epoch": epoch,
                 "train_loss": loss.item(),
                 "train_accuracy": accuracy,
+                "learning_rate": current_lr,
                 "examples": num_batches * config.batch_size,
             })
             

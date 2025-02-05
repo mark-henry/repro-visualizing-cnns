@@ -22,23 +22,31 @@ class SimpleCNN(nn.Module):
         # Create convolutional layers with appropriate strides
         # First layer uses stride 2 as per ZF2013 Fig 3
         self.conv_layers = nn.ModuleList([
-            ConvLayer(1, config.conv1_channels, config.kernel_size, stride=2),
-            ConvLayer(config.conv1_channels, config.conv2_channels, config.kernel_size, stride=1)
+            ConvLayer(3, config.conv1_channels, config.kernel_size, stride=2),  # Changed input channels to 3 for RGB
+            ConvLayer(config.conv1_channels, config.conv2_channels, config.kernel_size, stride=1),
+            ConvLayer(config.conv2_channels, config.conv3_channels, config.kernel_size, stride=1),  # Added third conv layer
+            ConvLayer(config.conv3_channels, config.conv4_channels, config.kernel_size, stride=1)   # Added fourth conv layer
         ])
         
         # Create corresponding deconvolutional layers with references to conv layers
         self.deconv_layers = nn.ModuleList([
+            DeconvLayer(self.conv_layers[3]),  # Fourth conv layer
+            DeconvLayer(self.conv_layers[2]),  # Third conv layer
             DeconvLayer(self.conv_layers[1]),  # Second conv layer
             DeconvLayer(self.conv_layers[0])   # First conv layer
         ])
         
         # Calculate final feature map size
-        # Input is 28x28
-        # After first conv with stride 2: 14x14
-        # After first pool: 7x7
-        # After second conv with stride 1: 7x7
-        # After second pool: 3x3
-        self.fc = nn.Linear(config.conv2_channels * 3 * 3, config.fc_units)
+        # Input is 224x224
+        # After first conv with stride 2: 112x112
+        # After first pool: 56x56
+        # After second conv with stride 1: 56x56
+        # After second pool: 28x28
+        # After third conv with stride 1: 28x28
+        # After third pool: 14x14
+        # After fourth conv with stride 1: 14x14
+        # After fourth pool: 7x7
+        self.fc = nn.Linear(config.conv4_channels * 7 * 7, config.fc_units)  # Changed to 1000 output units for ImageNet
         
         # Filter normalization parameter
         self.filter_radius = 1e-1  # As per ZF2013

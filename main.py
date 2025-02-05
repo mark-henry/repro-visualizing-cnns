@@ -12,15 +12,17 @@ if __name__ == "__main__":
     # Configuration
     config = {
         "architecture": "SimpleCNN",
-        "dataset": "MNIST",
+        "dataset": "CIFAR100",
         "epochs": 1,
-        "batch_size": 64,
+        "batch_size": 32,
         "learning_rate": 0.001,
-        "conv1_channels": 8,
-        "conv2_channels": 16,
-        "kernel_size": 5,
+        "conv1_channels": 96,
+        "conv2_channels": 256,
+        "conv3_channels": 384,
+        "conv4_channels": 384,
+        "kernel_size": 11,
         "pool_size": 2,
-        "fc_units": 10,
+        "fc_units": 100,
     }
     
     # Parse arguments
