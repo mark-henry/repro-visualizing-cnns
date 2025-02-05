@@ -19,8 +19,26 @@ class ConvLayer(nn.Module):
         padding = ((stride - 1) + kernel_size - 1) // 2
         self.conv = nn.Conv2d(in_channels, out_channels, kernel_size, stride=stride, padding=padding)
         self.pool = nn.MaxPool2d(2, return_indices=True)
+        self.radius = 1e-1  # Fixed radius for filter renormalization (original value from paper)
         
-    def contrast_normalize(self, x, size=5, k=2):
+    def renormalize_filters(self):
+        """Renormalize filters whose RMS exceeds fixed radius back to that radius"""
+        with torch.no_grad():
+            # Calculate RMS of each filter
+            weight = self.conv.weight
+            rms = torch.sqrt(torch.mean(weight.pow(2), dim=[1,2,3]))
+            
+            # Find filters exceeding radius
+            mask = rms > self.radius
+            
+            # Rescale those filters
+            scale = self.radius / rms
+            scale[~mask] = 1.0  # Don't change filters within radius
+            
+            # Apply scaling to each filter
+            self.conv.weight.data *= scale.view(-1, 1, 1, 1)
+        
+    def contrast_normalize(self, x, size=5, k=1):
         """Local contrast normalization as per ZF2013
         Args:
             x: Input tensor [batch, channels, height, width]
@@ -62,6 +80,9 @@ class ConvLayer(nn.Module):
         Returns:
             LayerState containing output and intermediate states
         """
+        # Renormalize filters
+        self.renormalize_filters()
+        
         # Convolution
         x = self.conv(x)
         

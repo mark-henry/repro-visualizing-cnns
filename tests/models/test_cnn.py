@@ -70,8 +70,8 @@ def test_filter_normalization(small_config):
         # Second layer: both filters below radius
         model.conv_layers[1].conv.weight.data.fill_(0.05)  # All RMS = 0.05
     
-    # Force normalization and get info
-    norm_info = model.normalize_filters(force=True)
+    # Run normalization and get info
+    norm_info = model.normalize_filters()
     
     # Test first layer
     assert 0 in norm_info, "First layer should have been normalized"
@@ -95,19 +95,6 @@ def test_filter_normalization(small_config):
     assert torch.allclose(model.conv_layers[0].conv.weight.data[1].mean(), 
                          torch.tensor(0.05)), \
         "Non-exceeded filter weights should remain unchanged"
-    
-    # Test periodic normalization timing
-    model.steps_until_next_norm = model.norm_frequency  # Reset clock
-    assert not model.is_filter_norm_due(), "Should not normalize when clock just reset"
-    
-    # Tick clock until just before it's due
-    for _ in range(model.norm_frequency - 1):
-        assert not model.tick_filter_norm_clock(), "Should not normalize before clock reaches zero"
-        assert not model.is_filter_norm_due(), "Should not be due before clock reaches zero"
-    
-    # Final tick should trigger normalization
-    assert model.tick_filter_norm_clock(), "Should normalize when clock reaches zero"
-    assert model.steps_until_next_norm == model.norm_frequency, "Clock should reset after triggering"
 
 @dataclass
 class TestConfig:
@@ -237,6 +224,37 @@ def test_single_forward_pass_with_visualization():
         print(f"Std deviation: {feature_maps.std():.3f}")
         print(f"Max activation: {feature_maps.max():.3f}")
         print(f"Min activation: {feature_maps.min():.3f}")
+
+    print("\nFeature map statistics for layer 1:")
+    print(f"Mean activation: {model_state.layer_states[0].pre_pool.mean():.3f}")
+    print(f"Std deviation: {model_state.layer_states[0].pre_pool.std():.3f}")
+    print(f"Max activation: {model_state.layer_states[0].pre_pool.max():.3f}")
+    print(f"Min activation: {model_state.layer_states[0].pre_pool.min():.3f}")
+
+    print("\nVisualizing Layer 2")
+    print(f"Feature maps shape: {model_state.layer_states[1].output.shape}")
+    print("First feature map values:")
+    print(model_state.layer_states[1].output[0, 0])
+
+    # Add detailed statistics for each feature map in layer 2
+    print("\nLayer 2 feature map statistics:")
+    for i in range(model_state.layer_states[1].output.shape[1]):
+        fmap = model_state.layer_states[1].output[0, i]  # Get i-th feature map
+        if fmap.max() > 0.1:  # Only show maps with significant activation
+            print(f"\nFeature map {i}:")
+            print(f"Mean: {fmap.mean():.3f}")
+            print(f"Max: {fmap.max():.3f}")
+            print(f"Non-zero elements: {(fmap > 0).sum().item()}/{fmap.numel()}")
+
+    print("\nOverall Layer 2 Statistics:")
+    print(f"Mean activation across all maps: {model_state.layer_states[1].output.mean():.3f}")
+    print(f"Std deviation across all maps: {model_state.layer_states[1].output.std():.3f}")
+    print(f"Max activation across all maps: {model_state.layer_states[1].output.max():.3f}")
+    print(f"Number of maps with max > 0.1: {(model_state.layer_states[1].output.max(dim=2)[0].max(dim=2)[0] > 0.1).sum().item()}")
+    print(f"Percentage of active neurons: {(model_state.layer_states[1].output > 0).float().mean().item()*100:.1f}%")
+
+    # Continue with zeroing and reconstruction
+    print("\nZeroed maps shape:", zeroed_maps.shape)
 
 if __name__ == "__main__":
     test_single_forward_pass_with_visualization() 

@@ -40,44 +40,21 @@ class SimpleCNN(nn.Module):
         # After second pool: 3x3
         self.fc = nn.Linear(config.conv2_channels * 3 * 3, config.fc_units)
         
-        # Filter normalization parameters
+        # Filter normalization parameter
         self.filter_radius = 1e-1  # As per ZF2013
-        self.steps_until_next_norm = self.norm_frequency = 50  # Normalize every 50 steps
         
         # Device handling
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         self.to(self.device)
         
-    def tick_filter_norm_clock(self):
-        """Advance the filter normalization clock and return whether it's time to normalize.
-        
-        Returns:
-            bool: True if it's time to normalize filters (clock has reached frequency)
-        """
-        self.steps_until_next_norm -= 1
-        if self.steps_until_next_norm <= 0:
-            self.steps_until_next_norm = self.norm_frequency
-            return True
-        return False
-    
-    def is_filter_norm_due(self):
-        """Check if it's time to normalize filters based on the clock without advancing it"""
-        return self.steps_until_next_norm <= 0
-    
-    def normalize_filters(self, force=False):
+    def normalize_filters(self):
         """Normalize filters whose RMS exceeds a fixed radius to that fixed radius (ZF2013 Sec 3)
         
-        Args:
-            force: If True, normalize regardless of clock. Useful for testing.
-            
         Returns:
             dict: Information about normalization for each layer:
                 {layer_idx: {'exceeded': tensor of which filters exceeded,
                            'scale': tensor of scaling factors applied}}
         """
-        if not (force or self.tick_filter_norm_clock()):
-            return {}
-            
         normalization_info = {}
         with torch.no_grad():
             for i, layer in enumerate(self.conv_layers):

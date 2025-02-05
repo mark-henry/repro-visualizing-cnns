@@ -33,7 +33,12 @@ if __name__ == "__main__":
                       help='Number of images to search for strongest activations (default: 10000)')
     parser.add_argument('--layers', type=str, default='1,2',
                       help='Comma-separated list of layers to visualize (default: 1,2)')
+    parser.add_argument('--epochs', type=int, default=1,
+                      help='Number of epochs to train for (default: 1)')
     args = parser.parse_args()
+    
+    # Update config with command line arguments
+    config["epochs"] = args.epochs
     
     # Main execution
     if args.mode == 'train':
@@ -42,7 +47,7 @@ if __name__ == "__main__":
             config = wandb.config
             train_loader, test_loader = get_data(config)
             model = SimpleCNN(config)
-            train(model, train_loader, config)
+            train(model, train_loader, test_loader, config)
             
             print(f"Saving model to {args.model_path}...")
             torch.save(model.state_dict(), args.model_path, _use_new_zipfile_serialization=False)
