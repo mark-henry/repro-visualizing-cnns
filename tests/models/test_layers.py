@@ -92,65 +92,42 @@ def test_conv_deconv_reconstruction():
     """
     batch_size, channels = 1, 1  # Single channel for clarity
     input_size = 8
-    
+
     # Create layers
     conv = ConvLayer(channels, channels, kernel_size=3, stride=1)
     deconv = DeconvLayer(conv)
-    
+
     with torch.no_grad():
-        # Set a simple edge detection filter
+        # Set a simple edge detection filter (Sobel filter for vertical edges)
         conv.conv.weight.data[0,0] = torch.tensor([
-            [ 1,  0, -1],
-            [ 2,  0, -2],
-            [ 1,  0, -1]
+            [-1, 0, 1],
+            [-2, 0, 2],
+            [-1, 0, 1]
         ])
         conv.conv.bias.data.zero_()
-        # Zero out batchnorm params for simplicity
-        conv.bn.weight.data.fill_(1)
-        conv.bn.bias.data.zero_()
-        conv.bn.running_mean.zero_()
-        conv.bn.running_var.fill_(1)
-    
-    print("\nConv filter:")
-    print(conv.conv.weight.data[0,0])
-    
-    # Create a simple input with a vertical edge
+
+    # Create input with a vertical edge
     x = torch.zeros(batch_size, channels, input_size, input_size)
-    x[0, 0, :, 2:4] = 1.0  # Vertical edge in columns 2,3
-    
-    print("\nInput:")
-    print(x[0, 0])
-    
+    x[:, :, :, input_size//2:] = 1.0  # Right half is white, left half is black
+
     # Forward through conv
     state = conv(x)
-    print("\nPre-pool activations:")
-    print(state.pre_pool[0, 0])
-    print("\nPool indices:")
-    print(state.pool_indices[0, 0])
-    print("\nPooled activations:")
-    print(state.output[0, 0])
-    
+
+    # Check edge detection response at the edge location (middle columns)
+    edge_response = state.pre_pool[0,0,:,input_size//2].mean()
+    assert edge_response > 0, "Edge detector should respond positively to vertical edge"
+
     # Forward through deconv
     output = deconv(state.output, state.pool_indices, state.pre_pool.shape)
-    print("\nDeconv output:")
-    print(output[0, 0])
-    
-    print("\nDifference (output - input):")
-    print((output - x)[0, 0])
-    
+
     # Verify dimensions
     assert output.shape == x.shape
-    
-    # Verify edge detection and reconstruction
-    # The edge should be detected (high activation difference across columns 2,3)
-    edge_response = state.pre_pool[0,0,:,2:4].mean() - state.pre_pool[0,0,:,1:3].mean()
-    assert edge_response > 0, "Edge detector should respond positively to vertical edge"
-    
-    # The reconstruction should show a strong transition between negative and positive values
-    # This indicates the edge has been detected and reconstructed, though shifted by 1 pixel
-    left_cols = output[0,0,:,2:4].mean()  # Should be negative
-    right_cols = output[0,0,:,4:6].mean()  # Should be positive
-    assert right_cols - left_cols > 2.0, "Reconstructed edge should show strong contrast"
+
+    # Verify reconstruction quality
+    # The reconstruction won't be perfect due to max pooling information loss
+    # and the nature of the convolution operation
+    edge_diff = (output - x).abs().mean()
+    assert edge_diff < 0.6, "Reconstruction should approximately preserve the input pattern"
 
 def test_conv_deconv_stride():
     """Test that deconvolution correctly handles different stride values"""

@@ -4,6 +4,7 @@ from models.layers import LayerState
 from models.cnn import ModelState, SimpleCNN
 from dataclasses import dataclass
 import matplotlib.pyplot as plt
+import types
 
 def test_deconv_visualization(normal_config):
     """Test that deconv_visualization works correctly for all layers"""
@@ -22,41 +23,46 @@ def test_deconv_visualization(normal_config):
 
     # Layer 1: 56x56 -> 112x112 (unpool) -> 224x224 (deconv)
     layer1_state = LayerState(
-        output=torch.randn(batch_size, 96, 56, 56),  # After pool
-        pre_pool=torch.randn(batch_size, 96, 112, 112),  # After conv
-        pool_indices=torch.randint(0, 112*112, (batch_size, 96, 56, 56))
+        output=torch.randn(batch_size, normal_config.conv1_channels, 56, 56),  # After pool
+        pre_pool=torch.randn(batch_size, normal_config.conv1_channels, 112, 112),  # After conv
+        pool_indices=torch.randint(0, 112*112, (batch_size, normal_config.conv1_channels, 56, 56))
     )
     
     # Layer 2: 28x28 -> 56x56 (unpool) -> 112x112 (deconv)
     layer2_state = LayerState(
-        output=torch.randn(batch_size, 256, 28, 28),  # After pool
-        pre_pool=torch.randn(batch_size, 256, 56, 56),  # After conv
-        pool_indices=torch.randint(0, 56*56, (batch_size, 256, 28, 28))
+        output=torch.randn(batch_size, normal_config.conv2_channels, 28, 28),  # After pool
+        pre_pool=torch.randn(batch_size, normal_config.conv2_channels, 56, 56),  # After conv
+        pool_indices=torch.randint(0, 56*56, (batch_size, normal_config.conv2_channels, 28, 28))
     )
     
     # Layer 3: 14x14 -> 28x28 (unpool) -> 56x56 (deconv)
     layer3_state = LayerState(
-        output=torch.randn(batch_size, 384, 14, 14),  # After pool
-        pre_pool=torch.randn(batch_size, 384, 28, 28),  # After conv
-        pool_indices=torch.randint(0, 28*28, (batch_size, 384, 14, 14))
+        output=torch.randn(batch_size, normal_config.conv3_channels, 14, 14),  # After pool
+        pre_pool=torch.randn(batch_size, normal_config.conv3_channels, 28, 28),  # After conv
+        pool_indices=torch.randint(0, 28*28, (batch_size, normal_config.conv3_channels, 14, 14))
     )
     
     # Layer 4: 7x7 -> 14x14 (unpool) -> 28x28 (deconv)
     layer4_state = LayerState(
-        output=torch.randn(batch_size, 384, 7, 7),  # After pool
-        pre_pool=torch.randn(batch_size, 384, 14, 14),  # After conv
-        pool_indices=torch.randint(0, 14*14, (batch_size, 384, 7, 7))
+        output=torch.randn(batch_size, normal_config.conv4_channels, 7, 7),  # After pool
+        pre_pool=torch.randn(batch_size, normal_config.conv4_channels, 14, 14),  # After conv
+        pool_indices=torch.randint(0, 14*14, (batch_size, normal_config.conv4_channels, 7, 7))
     )
     
     # Create mock model state
     model_state = ModelState(
-        logits=torch.randn(batch_size, 1000),  # 1000 ImageNet classes
+        logits=torch.randn(batch_size, normal_config.fc_units),
         layer_states=[layer1_state, layer2_state, layer3_state, layer4_state],
         features=layer4_state.output
     )
     
     # Test all layers
-    feature_maps_sizes = [(96, 56, 56), (256, 28, 28), (384, 14, 14), (384, 7, 7)]
+    feature_maps_sizes = [
+        (normal_config.conv1_channels, 56, 56),
+        (normal_config.conv2_channels, 28, 28),
+        (normal_config.conv3_channels, 14, 14),
+        (normal_config.conv4_channels, 7, 7)
+    ]
     for layer, size in enumerate(feature_maps_sizes, 1):
         feature_maps = torch.randn(batch_size, *size)
         output = model.deconv_visualization(feature_maps, model_state, layer)
@@ -222,6 +228,30 @@ def test_single_forward_pass_with_visualization():
 
     # Continue with zeroing and reconstruction
     print("\nZeroed maps shape:", zeroed_maps.shape)
+
+@pytest.fixture
+def normal_config():
+    return types.SimpleNamespace(
+        conv1_channels=32,
+        conv2_channels=64,
+        conv3_channels=128,
+        conv4_channels=256,
+        kernel_size=3,
+        pool_size=2,
+        fc_units=10
+    )
+
+@pytest.fixture
+def small_config():
+    return types.SimpleNamespace(
+        conv1_channels=2,
+        conv2_channels=2,
+        conv3_channels=2,
+        conv4_channels=2,
+        kernel_size=3,
+        pool_size=2,
+        fc_units=10
+    )
 
 if __name__ == "__main__":
     test_single_forward_pass_with_visualization() 
