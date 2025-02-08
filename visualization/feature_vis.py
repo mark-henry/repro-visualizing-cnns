@@ -3,11 +3,22 @@ import matplotlib.pyplot as plt
 import wandb
 from tqdm.auto import tqdm
 import heapq
+import numpy as np
+import os
+import warnings
 
-def find_strongest_activations(model, data_loader, num_samples=1000, top_k=9):
+def normalize_for_display(img_tensor):
+    """Normalize tensor to 0-1 range for display"""
+    img_min = img_tensor.min()
+    img_max = img_tensor.max()
+    if img_min == img_max:
+        return torch.zeros_like(img_tensor)
+    return (img_tensor - img_min) / (img_max - img_min)
+
+def find_strongest_activations(model, data_loader, num_samples=1000, top_k=4):
     """Find strongest activations for each feature map"""
     model.eval()
-    strongest = {layer: {'activations': None, 'images': None} for layer in [1, 2]}
+    strongest = {layer: {'activations': None, 'images': None} for layer in [1, 2, 3, 4]}
     
     print(f"Finding strongest activations across {num_samples} samples...")
     with torch.no_grad():
@@ -20,7 +31,7 @@ def find_strongest_activations(model, data_loader, num_samples=1000, top_k=9):
             model_state = model(images)
             
             # Process each layer
-            for layer in [1, 2]:
+            for layer in [1, 2, 3, 4]:
                 # Get feature maps for this layer
                 acts = (model_state.final_features if layer == len(model.conv_layers)
                        else model_state.layer_states[layer-1].output)
@@ -58,7 +69,9 @@ def find_strongest_activations(model, data_loader, num_samples=1000, top_k=9):
 def visualize_features(model, strongest_activations, layer):
     """Visualize patterns that cause strongest activations using deconvnet approach (ZF2013)"""
     model.eval()
-    with torch.no_grad():
+    with torch.no_grad(), warnings.catch_warnings():
+        warnings.filterwarnings('ignore', category=UserWarning)
+        
         num_features = len(strongest_activations[layer]['activations'])
         num_features = min(32, num_features)  # Limit to 32 features max
         
@@ -67,9 +80,9 @@ def visualize_features(model, strongest_activations, layer):
         grid_rows = (num_features + grid_cols - 1) // grid_cols
         
         # Create figure
-        # Each 3x3 block is treated as one unit
+        # Each 2x2 block is treated as one unit
         fig = plt.figure(figsize=(5 * grid_cols, 5 * grid_rows))
-        plt.suptitle(f'Layer {layer} Features - Top 9 Activations Each', y=0.95, fontsize=16)
+        plt.suptitle(f'Layer {layer} Features - Top 4 Activations Each', y=0.95, fontsize=16)
         
         # Create grid for feature blocks
         gs = plt.GridSpec(grid_rows, grid_cols, figure=fig)
@@ -80,8 +93,8 @@ def visualize_features(model, strongest_activations, layer):
             grid_row = feature_idx // grid_cols
             grid_col = feature_idx % grid_cols
             
-            # Create subgrid for this feature's 3x3 activations
-            subgs = gs[grid_row, grid_col].subgridspec(3, 3, wspace=0, hspace=0)
+            # Create subgrid for this feature's 2x2 activations
+            subgs = gs[grid_row, grid_col].subgridspec(2, 2, wspace=0, hspace=0)
             
             # Sort activations by strength
             activations = strongest_activations[layer]['activations'][feature_idx]
@@ -96,10 +109,10 @@ def visualize_features(model, strongest_activations, layer):
                         verticalalignment='top')
             ax_title.axis('off')
             
-            # Process top 9 activations for this feature
-            for i, act in enumerate(sorted_acts[:9]):
-                row = i // 3
-                col = i % 3
+            # Process top 4 activations for this feature
+            for i, act in enumerate(sorted_acts[:4]):
+                row = i // 2
+                col = i % 2
                 
                 # Create subplot for this activation
                 ax = fig.add_subplot(subgs[row, col])
@@ -122,13 +135,19 @@ def visualize_features(model, strongest_activations, layer):
                 
                 # Plot reconstruction
                 img = reconstruction.squeeze().cpu()
+                if len(img.shape) == 3:  # If image has channels
+                    img = img.permute(1, 2, 0)  # Change from CxHxW to HxWxC
                 vmax = torch.abs(img).max().item()
                 ax.imshow(img, cmap='RdBu_r', vmin=-vmax, vmax=vmax)
                 ax.axis('off')
                 
                 # Add input image inset
                 ax_ins = ax.inset_axes([0.7, 0.7, 0.3, 0.3])
-                ax_ins.imshow(image.squeeze().cpu(), cmap='gray')
+                inset_img = image.squeeze().cpu()
+                if len(inset_img.shape) == 3:  # If image has channels
+                    inset_img = inset_img.permute(1, 2, 0)  # Change from CxHxW to HxWxC
+                    inset_img = normalize_for_display(inset_img)  # Normalize to 0-1 range
+                ax_ins.imshow(inset_img)
                 ax_ins.axis('off')
                 
                 # Add activation value in top-left corner

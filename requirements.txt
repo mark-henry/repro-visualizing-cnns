@@ -1,11 +1,12 @@
-torch>=2.5.1
-torchvision>=0.20.1
-numpy>=2.2.1
-matplotlib>=3.10.0
-wandb>=0.19.1
-tqdm>=4.67.1
-onnx>=1.17.0
-onnx2pytorch>=0.5.1
-pytest>=8.3.4
-pillow>=11.0.0
-scipy>=1.15.1
+--find-links https://download.pytorch.org/whl/cu118
+torch>=2.0.0+cu118
+torchvision>=0.15.0+cu118
+numpy>=1.24.0
+matplotlib>=3.7.0
+wandb>=0.15.0
+tqdm>=4.65.0
+onnx>=1.14.0
+onnx2pytorch>=0.5.0
+pytest>=7.0.0
+pillow>=10.0.0
+scipy>=1.10.0

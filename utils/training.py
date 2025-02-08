@@ -56,13 +56,13 @@ def train(model, train_loader, test_loader, config):
     optimizer = torch.optim.Adam(model.parameters(), lr=config.learning_rate)
     
     # Cosine annealing scheduler with warm restarts
-    # T_0: number of iterations for the first restart
-    # T_mult: factor to increase T_i after a restart
-    # We'll do 2 restarts per epoch, and double the cycle length after each restart
+    # - First restart after 1/3 of total epochs
+    # - Second restart after 2/3 of total epochs
     steps_per_epoch = len(train_loader)
+    total_steps = steps_per_epoch * config.epochs
     scheduler = CosineAnnealingWarmRestarts(
         optimizer,
-        T_0=steps_per_epoch // 2,  # First restart after half epoch
+        T_0=total_steps // 3,  # First restart after 1/3 of total training
         T_mult=2,  # Double the period after each restart
         eta_min=config.learning_rate * 0.01  # Min learning rate is 1% of initial
     )
@@ -74,8 +74,8 @@ def train(model, train_loader, test_loader, config):
     
     # Track best model
     best_test_acc = 0
-    eval_frequency = 500  # Evaluate every 500 batches
-    norm_frequency = 50   # Normalize filters every 50 batches
+    eval_steps = total_steps // 10  # Evaluate 10 times during training
+    norm_steps = total_steps // 100  # Normalize 100 times during training
     global_step = 0
     
     for epoch in tqdm(range(config.epochs)):
@@ -100,7 +100,7 @@ def train(model, train_loader, test_loader, config):
             current_lr = scheduler.get_last_lr()[0]
             
             # Periodic filter normalization
-            if global_step % norm_frequency == 0:
+            if global_step % norm_steps == 0:
                 normalization_info = model.normalize_filters()
                 if normalization_info:  # Log if any filters were normalized
                     wandb.log({
@@ -127,7 +127,7 @@ def train(model, train_loader, test_loader, config):
             
             # Evaluate on test set periodically
             global_step += 1
-            if global_step % eval_frequency == 0:
+            if global_step % eval_steps == 0:
                 test_loss, test_accuracy = evaluate(model, test_loader)
                 wandb.log({
                     "test_loss": test_loss,

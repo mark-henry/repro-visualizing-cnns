@@ -2,6 +2,7 @@ import os
 import torch
 import wandb
 import argparse
+import shutil
 from types import SimpleNamespace
 
 from models.cnn import SimpleCNN
@@ -31,10 +32,10 @@ if __name__ == "__main__":
                       help='Whether to train a new model or visualize an existing one')
     parser.add_argument('--model_path', type=str, default='model.pth',
                       help='Path to save/load the model (default: model.pth)')
-    parser.add_argument('--num_images', type=int, default=10000,
-                      help='Number of images to search for strongest activations (default: 10000)')
-    parser.add_argument('--layers', type=str, default='1,2',
-                      help='Comma-separated list of layers to visualize (default: 1,2)')
+    parser.add_argument('--num_images', type=int, default=2000,
+                      help='Number of images to search for strongest activations (default: 2000)')
+    parser.add_argument('--layers', type=str, default='1,2,3,4',
+                      help='Comma-separated list of layers to visualize (default: 1,2,3,4)')
     parser.add_argument('--epochs', type=int, default=1,
                       help='Number of epochs to train for (default: 1)')
     args = parser.parse_args()
@@ -44,16 +45,27 @@ if __name__ == "__main__":
     
     # Main execution
     if args.mode == 'train':
-        print("Training new model...")
         with wandb.init(project="cnn-feature-visualization", config=config):
             config = wandb.config
             train_loader, test_loader = get_data(config)
+            
+            # Create or load model
             model = SimpleCNN(config)
+            if os.path.exists(args.model_path):
+                print(f"Loading existing model from {args.model_path}...")
+                model.load_state_dict(torch.load(args.model_path, weights_only=True))
+            else:
+                print("Training new model...")
+            
             train(model, train_loader, test_loader, config)
             
             print(f"Saving model to {args.model_path}...")
             torch.save(model.state_dict(), args.model_path, _use_new_zipfile_serialization=False)
-            wandb.save(args.model_path)
+            
+            # Copy the model file to wandb instead of using symlink
+            wandb_model_path = os.path.join(wandb.run.dir, "model.pth")
+            shutil.copy2(args.model_path, wandb_model_path)
+            wandb.save(wandb_model_path)
             print("Training complete!")
             
     else:  # visualize mode
@@ -70,7 +82,7 @@ if __name__ == "__main__":
         with wandb.init(project="cnn-feature-visualization", config=config, job_type="visualization"):
             strongest = find_strongest_activations(model, test_loader, args.num_images)
             for layer in layers:
-                if layer not in [1, 2]:
+                if layer not in [1, 2, 3, 4]:
                     print(f"Warning: Layer {layer} not supported. Skipping...")
                     continue
                 print(f"Visualizing strongest activations for layer {layer}...")
